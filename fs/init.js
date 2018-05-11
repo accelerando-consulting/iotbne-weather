@@ -1,40 +1,108 @@
 load('api_config.js');
+load('api_dht.js');
 load('api_events.js');
 load('api_gpio.js');
-load('api_mqtt.js');
+load('api_http.js')
 load('api_net.js');
 load('api_sys.js');
 load('api_timer.js');
 
-let led = Cfg.get('pins.led');
-let button = Cfg.get('pins.button');
-let topic = '/devices/' + Cfg.get('device.id') + '/events';
+//
+// Variables
+//
 
-print('LED GPIO:', led, 'button GPIO:', button);
+let ledPin = Cfg.get('pins.led') || 2;
+let rainPin = Cfg.get('pins.rain') || 5;
+let dhtPin =  Cfg.get('pins.dht') || 4;
+let push_token = Cfg.get('push.token');
+let push_user = Cfg.get('push.user');
+let push_sound = Cfg.get('push.sound');
 
-let getInfo = function() {
-  return JSON.stringify({
-    total_ram: Sys.total_ram(),
-    free_ram: Sys.free_ram()
-  });
-};
+let dht = DHT.create(dhtPin, DHT.DHT11);
 
-// Blink built-in LED every second
+let raining=0;
+let temp = 0;
+let hum = 0;
+let debounce = false;
+
+print('LED GPIO:', ledPin, 'rain GPIO:', rainPin, 'dht GPIO:', dhtPin);
+
+//
+// Setup
+//
+
+// Use a timer interrupt to poll sensors (and built-in LED) every 10 seconds
 GPIO.set_mode(led, GPIO.MODE_OUTPUT);
-Timer.set(1000 /* 1 sec */, Timer.REPEAT, function() {
-  let value = GPIO.toggle(led);
-  print(value ? 'Tick' : 'Tock', 'uptime:', Sys.uptime(), getInfo());
-}, null);
+Timer.set(10000 /* 1 sec */, Timer.REPEAT, poll_sensors, null);
 
-// Publish to MQTT topic on a button press. Button is wired to GPIO pin 0
-GPIO.set_button_handler(button, GPIO.PULL_UP, GPIO.INT_EDGE_NEG, 20, function() {
-  let message = getInfo();
-  let ok = MQTT.pub(topic, message, 1);
-  print('Published:', ok, topic, '->', message);
-}, null);
+// Install an interrupt for immediate rain detection.
+// Ignore repeated events within 1000ms (in case of "sensor bounce")
+GPIO.set_button_handler(rainPin, GPIO.PULL_UP, GPIO.INT_EDGE_NEG, 1000, rain_event, null);
 
-// Monitor network connectivity.
-Event.addGroupHandler(Net.EVENT_GRP, function(ev, evdata, arg) {
+// Install an interrupt to report changes in wifi status
+Event.addGroupHandler(Net.EVENT_GRP, wifi_event, null);
+
+//
+// Main Loop
+//
+
+// (there is no main loop, everything happens via the interrupts configured above)
+
+
+
+//
+// Functions
+//
+
+
+function poll_sensors() {
+  //
+  // Read the sensors and print the status (for diagnostics)
+  //
+  GPIO.toggle(led);
+  raining = !GPIO.read(rainPin);
+  temp = dht.getTemp();
+  hum = dht.getHumidity();
+  
+  print((raining ? 'RAINY' : 'Dry'), 'temp=', temp, 'hum=', hum);
+}
+
+
+function push_message(title, message) {
+  //
+  // Send a message to the Pushover notification service
+  //
+  print('push message', title, message);
+
+  HTTP.query({
+    url: 'https://api.pushover.net/1/messages.json',
+    data: { token: push_token,
+	    user: push_user,
+	    message: message,
+	    title: title,
+	    sound: push_sound
+	    
+	  },
+    success: function(body, full_http_msg) { print('push result', body); },
+    error: function(err) { print('push error', err); },  // Optional
+  });
+  print('push sent')
+}
+
+
+function rain_event() {
+  //
+  // Respond to a rain event.
+  //
+  // Send a push notification
+  push_message('Rain Alarm', 'It\'s raining, get the washing in!');
+}
+
+function wifi_event(ev, evdata, arg) {
+
+  //
+  // Monitor network connectivity.
+  //
   let evs = '???';
   if (ev === Net.STATUS_DISCONNECTED) {
     evs = 'DISCONNECTED';
@@ -46,4 +114,5 @@ Event.addGroupHandler(Net.EVENT_GRP, function(ev, evdata, arg) {
     evs = 'GOT_IP';
   }
   print('== Net event:', ev, evs);
-}, null);
+}
+
