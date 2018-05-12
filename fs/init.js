@@ -15,8 +15,8 @@ load('api_timer.js');
 let ledPin = Cfg.get('pins.led') || 2;
 let rainPin = Cfg.get('pins.rain') || 15;
 let dhtPin =  Cfg.get('pins.dht') || 4;
-let push_token = Cfg.get('push.token');
-let push_user = Cfg.get('push.user');
+let push_token = Cfg.get('pushover.token');
+let push_user = Cfg.get('pushover.user');
 let push_sound = Cfg.get('push.sound');
 
 let i2c_addr = 0x44;
@@ -68,21 +68,26 @@ function poll_sensors() {
 }
 
 
-function push_message(title, message) {
+function push_message(title, msg) {
   //
   // Send a message to the Pushover notification service
   //
-  print('push message', title, message);
+  print('push message', title, msg);
 
   HTTP.query({
     url: 'https://api.pushover.net/1/messages.json',
-    data: { token: push_token,
+    /*
+    'application/json' },
+    data: { 
+      token: push_token,
 	    user: push_user,
-	    message: message,
-	    title: title,
-	    sound: push_sound
-	    
+	    message: 'YO SUCKA',//msg,
 	  },
+	  */
+	  headers: { 'Content-Type': 'application/x-www-form-urlencoded'},
+	  // the post body has to be URL-encoded not JSON. 
+	  // TODO: encode 'msg' as form-safe data
+	  data: 'token=APP_TOKEN_HERE&user=USER_KEY_HERE&message=RAIN',
     success: function(body, full_http_msg) { print('push result', body); },
     error: function(err) { print('push error', err); },  // Optional
   });
@@ -125,7 +130,7 @@ function wifi_event(ev, evdata, arg) {
 // (there is no main loop, everything happens via the interrupts configured above)
 
 
-Timer.set(1000 /* 1 sec */, Timer.REPEAT, poll_sensors, null);
+Timer.set(5000 /* 1 sec */, Timer.REPEAT, poll_sensors, null);
 
 // Install an interrupt for immediate rain detection.
 // Ignore repeated events within 1000ms (in case of "sensor bounce")
